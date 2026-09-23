@@ -1,0 +1,59 @@
+dataset:
+  path: "data/ratings.csv"
+  synthetic:
+    num_users: 60
+    num_items: 80
+    seed: 3
+    popularity_alpha: 1.0
+    cluster_count: 10
+    user_cluster_pref: 2
+  min_user_ratings: 4
+  min_item_ratings: 4
+  split_fractions:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+
+federated:
+  num_clients: 60
+  clients_per_round: 10
+  num_rounds: 4
+  local_epochs: 2
+  batch_size: 32
+  lr: 0.01
+  seed: 3
+
+model:
+  embedding_dim: 8
+  mlp_layers: [16, 8]
+  dropout: 0.1
+
+privacy:
+  dp_enabled: true
+  secagg_enabled: true
+  he_enabled: false
+  clip_norm: 1.0
+  target_epsilon: 2.0
+  target_delta: 1.0e-5
+  noise_multiplier: null
+  relax_with_secagg: true
+  he:
+    poly_modulus_degree: 8192
+    coeff_mod_bit_sizes: [60, 40, 40, 60]
+    global_scale: 1073741824
+
+evaluation:
+  top_k: [5]
+  metrics: ["rmse", "recall", "ndcg"]
+  max_eval_users: 40
+
+attacks:
+  shadow_model_count: 2
+  shadow_epochs: 2
+  gradient_inversion_iters: 25
+  gradient_inversion_lr: 0.05
+
+experiment:
+  output_dir: "outputs/smoke"
+  device: "cpu"
+  log_every: 1
