@@ -33,6 +33,33 @@ def test_data_and_stats() -> None:
     assert synthetic.stats["n_users"] > 0
 
 
+def test_amazon_style_string_ids(tmp_path: Path) -> None:
+    ratings = pd.DataFrame(
+        {
+            "userId": ["u1", "u1", "u2", "u2", "u3"],
+            "movieId": ["m1", "m2", "m1", "m3", "m2"],
+            "rating": [5.0, 4.0, 3.5, 2.0, 4.5],
+            "timestamp": [100, 200, 150, 220, 300],
+        }
+    )
+    path = tmp_path / "amazon_ratings.csv"
+    ratings.to_csv(path, index=False)
+
+    cfg = {
+        "dataset": {
+            "path": str(path),
+            "min_user_ratings": 1,
+            "min_item_ratings": 1,
+            "split_fractions": {"train": 0.7, "val": 0.15, "test": 0.15},
+        }
+    }
+
+    bundle = load_movielens_data(cfg)
+    assert bundle.stats["n_users"] >= 3
+    assert bundle.stats["n_items"] >= 3
+    assert len(bundle.train_df) + len(bundle.val_df) + len(bundle.test_df) == bundle.stats["n_ratings"]
+
+
 def test_secagg_invariant() -> None:
     raw_update = {"w": torch.tensor([1.0, 2.0, 3.0]), "b": torch.tensor([0.5])}
     client_ids = [1, 2, 3]

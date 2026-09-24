@@ -40,10 +40,17 @@ def _iterative_filter(df: pd.DataFrame, min_user_ratings: int, min_item_ratings:
     return df
 
 
+def _normalize_ids(series: pd.Series) -> pd.Series:
+    """Coerce raw IDs to a stable string form before remapping them to contiguous ints."""
+    return series.map(lambda value: str(value).strip() if pd.notna(value) and str(value).strip() else None)
+
+
 def _remap_ids(df: pd.DataFrame) -> pd.DataFrame:
     """Remap user and item IDs to contiguous integer indices."""
-    user_map = {old: idx for idx, old in enumerate(sorted(df["userId"].unique()))}
-    item_map = {old: idx for idx, old in enumerate(sorted(df["movieId"].unique()))}
+    user_values = sorted(df["userId"].dropna().astype(str).unique())
+    item_values = sorted(df["movieId"].dropna().astype(str).unique())
+    user_map = {old: idx for idx, old in enumerate(user_values)}
+    item_map = {old: idx for idx, old in enumerate(item_values)}
     out = df.copy()
     out["userId"] = out["userId"].map(user_map)
     out["movieId"] = out["movieId"].map(item_map)
@@ -146,11 +153,11 @@ def load_movielens_data(config: dict[str, Any]) -> DatasetBundle:
         raise ValueError(f"Ratings data is missing columns: {sorted(missing)}")
 
     df = df.loc[:, ["userId", "movieId", "rating", "timestamp"]].copy()
-    df["userId"] = df["userId"].astype(int)
-    df["movieId"] = df["movieId"].astype(int)
+    df["userId"] = _normalize_ids(df["userId"])
+    df["movieId"] = _normalize_ids(df["movieId"])
     df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
     df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
-    df = df.dropna(subset=["rating", "timestamp"]).reset_index(drop=True)
+    df = df.dropna(subset=["userId", "movieId", "rating", "timestamp"]).reset_index(drop=True)
     df = _iterative_filter(df, min_user_ratings, min_item_ratings)
     df = _remap_ids(df)
 

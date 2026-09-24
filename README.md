@@ -54,12 +54,32 @@ python3 scripts/run_training.py --config configs/smoke_test.yaml
 python3 scripts/run_full_evaluation.py --config configs/smoke_test.yaml --output-dir outputs/smoke_grid
 ```
 
+## Amazon Movies and TV comparison setup
+
+Use the real Amazon review dataset alongside MovieLens by converting the review JSONL to the project’s expected CSV schema.
+
+```bash
+python3 scripts/convert_amazon_reviews.py \
+  --input /Users/mac/Downloads/Movies_and_TV.jsonl \
+  --output /Users/mac/Downloads/amazon_movies_tv_ratings.csv \
+  --max-rows 200000
+```
+
+Then point the project to the generated file by using the provided config:
+
+```bash
+python3 scripts/run_training.py --config configs/amazon_movies_tv.yaml
+```
+
+This config is tuned for a lighter Amazon comparison run and keeps the dataset size manageable while still producing a valid federated recommendation benchmark.
+
 ## Configuration
 
 The project uses YAML configs in `configs/`.
 
 - `configs/smoke_test.yaml` — lightweight validation run
 - `configs/default.yaml` — larger reproducible experiment setup
+- `configs/amazon_movies_tv.yaml` — Amazon review comparison setup
 
 Fields include FL settings, client counts, privacy parameters, defense toggles, and evaluation details.
 
