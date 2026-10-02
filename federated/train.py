@@ -106,6 +106,7 @@ def run_training(
 
     history: list[dict[str, Any]] = []
     epsilon_value: float | None = None
+    last_round_result: dict[str, Any] | None = None
     for round_id in range(num_rounds):
         selected_clients = sorted(random.sample(sorted(client_data), min(len(client_data), clients_per_round)))
         round_result = run_round(
@@ -120,6 +121,7 @@ def run_training(
             he_enabled=bool(config.get("privacy", {}).get("he_enabled", False)),
             relax_with_secagg_flag=bool(config.get("privacy", {}).get("relax_with_secagg", False)),
         )
+        last_round_result = round_result
 
         if config.get("privacy", {}).get("dp_enabled", False):
             noise_multiplier = resolve_noise_multiplier(config, num_clients=num_clients, clients_per_round=clients_per_round, rounds=num_rounds)
@@ -136,6 +138,9 @@ def run_training(
                 top_k=[int(k) for k in config.get("evaluation", {}).get("top_k", [5])],
                 max_users=int(config.get("evaluation", {}).get("max_eval_users", len(dataset_bundle.val_df))),
                 device=device,
+                implicit_feedback=bool(config.get("dataset", {}).get("implicit_feedback", False)),
+                candidate_items=range(int(dataset_bundle.stats["n_items"])),
+                seen_interactions=dataset_bundle.train_df[dataset_bundle.train_df["rating"] > 0],
             )
             history.append({"round": round_id, "epsilon": epsilon_value, **metrics})
 
@@ -147,6 +152,7 @@ def run_training(
         "epsilon": epsilon_value,
         "config": config,
         "accountant": accountant,
+        "last_round_result": last_round_result,
     }
 
 

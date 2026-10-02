@@ -11,14 +11,87 @@ from attacks.gradient_inversion import run_gradient_inversion_attack
 from attacks.membership_inference import loss_threshold_attack, shadow_model_attack
 from data.movielens import load_movielens_data
 from data.partition import compute_partition_stats
+from evaluate.metrics import evaluate_model
+from evaluate.run_experiment import build_experiment_grid
 from federated.client import compute_delta, train_local_client
 from federated.train import load_config, run_training
 from models.ncf import NCF
 from privacy.differential_privacy import clip_update
 from privacy.secure_aggregation import SecureAggregator, masked_sum_invariant
+from scripts.convert_amazon_catalog import convert_catalog
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_experiment_grid_sweeps_each_epsilon() -> None:
+    epsilons = [0.5, 1.0, 2.0]
+    defenses = ["no_defense", "secagg_only", "dp_only", "dp_secagg"]
+    grid = build_experiment_grid(epsilons, defenses)
+
+    assert len(grid) == 2 + 2 * len(epsilons)
+    assert [spec["name"] for spec in grid[:2]] == ["no_defense", "secagg_only"]
+    dp_specs = [spec for spec in grid if spec["dp_enabled"]]
+    assert {spec["epsilon"] for spec in dp_specs} == set(epsilons)
+    assert {spec["defense"] for spec in dp_specs} == {"dp_only", "dp_secagg"}
+
+
+def test_amazon_catalog_implicit_feedback_pipeline(tmp_path: Path) -> None:
+    catalog = pd.DataFrame(
+        {
+            "product_id": ["p1", "p2", "p3", "p4", "p5", "other"],
+            "category": ["Electronics|Audio"] * 5 + ["Home&Kitchen|Tools"],
+            "user_id": ["u1,u2,u3", "u1,u2,u4", "u1,u3,u4", "u2,u3,u4", "u1,u2,u3,u4", "u1,u2,u3"],
+        }
+    )
+    source_path = tmp_path / "amazon_catalog.csv"
+    interactions_path = tmp_path / "amazon_interactions.csv"
+    catalog.to_csv(source_path, index=False)
+    convert_catalog(source_path, interactions_path)
+
+    cfg = {
+        "dataset": {
+            "path": str(interactions_path),
+            "implicit_feedback": True,
+            "split_strategy": "random",
+            "split_seed": 7,
+            "min_user_ratings": 3,
+            "min_item_ratings": 2,
+            "negative_ratio": 1,
+            "split_fractions": {"train": 0.7, "val": 0.15, "test": 0.15},
+        }
+    }
+    bundle = load_movielens_data(cfg)
+    assert bundle.stats["n_users"] == 4
+    assert bundle.stats["n_items"] == 5
+    assert (bundle.train_df["rating"] == 0.0).any()
+    assert (bundle.val_df["rating"] == 1.0).all()
+    assert (bundle.test_df["rating"] == 1.0).all()
+
+    positives = pd.concat(
+        [
+            bundle.train_df[bundle.train_df["rating"] > 0],
+            bundle.val_df,
+            bundle.test_df,
+        ],
+        ignore_index=True,
+    )
+    negative_pairs = set(zip(bundle.train_df.loc[bundle.train_df["rating"] == 0, "userId"], bundle.train_df.loc[bundle.train_df["rating"] == 0, "movieId"]))
+    positive_pairs = set(zip(positives["userId"], positives["movieId"]))
+    assert not negative_pairs & positive_pairs
+
+    model = NCF(num_users=4, num_items=5, embedding_dim=4, mlp_layers=(8, 4), dropout=0.0)
+    metrics = evaluate_model(
+        model,
+        bundle.val_df,
+        top_k=[5],
+        implicit_feedback=True,
+        candidate_items=range(bundle.stats["n_items"]),
+        seen_interactions=bundle.train_df,
+    )
+    assert metrics["rmse"] is None
+    assert 0.0 <= metrics["recall"]["5"] <= 1.0
+    assert 0.0 <= metrics["ndcg"]["5"] <= 1.0
 
 
 def test_data_and_stats() -> None:

@@ -121,6 +121,72 @@ def _split_by_user(df: pd.DataFrame, train_frac: float, val_frac: float, test_fr
     return train_df, val_df, test_df
 
 
+def _split_random_by_user(
+    df: pd.DataFrame,
+    train_frac: float,
+    val_frac: float,
+    test_frac: float,
+    seed: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Create reproducible per-user holdouts when source data has no timestamps."""
+    rng = np.random.default_rng(seed)
+    train_rows: list[dict[str, Any]] = []
+    val_rows: list[dict[str, Any]] = []
+    test_rows: list[dict[str, Any]] = []
+
+    for _, user_df in df.groupby("userId", sort=True):
+        order = rng.permutation(len(user_df))
+        shuffled = user_df.iloc[order]
+        n = len(shuffled)
+        if n < 3:
+            train_rows.extend(shuffled.to_dict("records"))
+            continue
+        val_count = max(1, int(round(n * val_frac)))
+        test_count = max(1, int(round(n * test_frac)))
+        while val_count + test_count >= n:
+            if val_count >= test_count and val_count > 1:
+                val_count -= 1
+            elif test_count > 1:
+                test_count -= 1
+            else:
+                break
+        train_count = n - val_count - test_count
+        train_rows.extend(shuffled.iloc[:train_count].to_dict("records"))
+        val_rows.extend(shuffled.iloc[train_count : train_count + val_count].to_dict("records"))
+        test_rows.extend(shuffled.iloc[train_count + val_count :].to_dict("records"))
+
+    return pd.DataFrame(train_rows), pd.DataFrame(val_rows), pd.DataFrame(test_rows)
+
+
+def _add_training_negatives(
+    train_df: pd.DataFrame,
+    interactions: pd.DataFrame,
+    n_items: int,
+    negative_ratio: int,
+    seed: int,
+) -> pd.DataFrame:
+    """Sample unobserved user-item pairs as zero-label implicit-feedback examples."""
+    if train_df.empty or negative_ratio <= 0:
+        return train_df
+    rng = np.random.default_rng(seed)
+    observed = interactions.groupby("userId")["movieId"].agg(set).to_dict()
+    negative_rows: list[dict[str, int | float]] = []
+    item_ids = np.arange(n_items)
+    for user_id, user_train in train_df.groupby("userId", sort=True):
+        available = np.setdiff1d(item_ids, np.fromiter(observed.get(user_id, set()), dtype=np.int64))
+        sample_count = min(len(available), len(user_train) * negative_ratio)
+        if sample_count == 0:
+            continue
+        sampled = rng.choice(available, size=sample_count, replace=False)
+        negative_rows.extend(
+            {"userId": int(user_id), "movieId": int(item_id), "rating": 0.0}
+            for item_id in sampled
+        )
+    if not negative_rows:
+        return train_df
+    return pd.concat([train_df, pd.DataFrame(negative_rows)], ignore_index=True)
+
+
 def load_movielens_data(config: dict[str, Any]) -> DatasetBundle:
     """Load a ratings table from disk or synthesize a fallback if it does not exist.
 
@@ -133,6 +199,8 @@ def load_movielens_data(config: dict[str, Any]) -> DatasetBundle:
     min_user_ratings = int(dataset_cfg.get("min_user_ratings", 5))
     min_item_ratings = int(dataset_cfg.get("min_item_ratings", 5))
     split_cfg = dataset_cfg.get("split_fractions", {"train": 0.7, "val": 0.15, "test": 0.15})
+    split_strategy = str(dataset_cfg.get("split_strategy", "chronological"))
+    implicit_feedback = bool(dataset_cfg.get("implicit_feedback", False))
 
     if path and os.path.exists(path):
         df = pd.read_csv(path)
@@ -147,26 +215,53 @@ def load_movielens_data(config: dict[str, Any]) -> DatasetBundle:
             user_cluster_pref=int(synth_cfg.get("user_cluster_pref", 2)),
         )
 
-    required = {"userId", "movieId", "rating", "timestamp"}
+    required = {"userId", "movieId", "rating"}
+    if split_strategy == "chronological":
+        required.add("timestamp")
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Ratings data is missing columns: {sorted(missing)}")
 
-    df = df.loc[:, ["userId", "movieId", "rating", "timestamp"]].copy()
+    selected_columns = ["userId", "movieId", "rating"]
+    if "timestamp" in df.columns:
+        selected_columns.append("timestamp")
+    df = df.loc[:, selected_columns].copy()
     df["userId"] = _normalize_ids(df["userId"])
     df["movieId"] = _normalize_ids(df["movieId"])
     df["rating"] = pd.to_numeric(df["rating"], errors="coerce")
-    df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
-    df = df.dropna(subset=["userId", "movieId", "rating", "timestamp"]).reset_index(drop=True)
+    drop_columns = ["userId", "movieId", "rating"]
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+        if split_strategy == "chronological":
+            drop_columns.append("timestamp")
+    df = df.dropna(subset=drop_columns).reset_index(drop=True)
     df = _iterative_filter(df, min_user_ratings, min_item_ratings)
     df = _remap_ids(df)
 
-    train_df, val_df, test_df = _split_by_user(
-        df,
-        train_frac=float(split_cfg.get("train", 0.7)),
-        val_frac=float(split_cfg.get("val", 0.15)),
-        test_frac=float(split_cfg.get("test", 0.15)),
-    )
+    train_frac = float(split_cfg.get("train", 0.7))
+    val_frac = float(split_cfg.get("val", 0.15))
+    test_frac = float(split_cfg.get("test", 0.15))
+    if split_strategy == "random":
+        train_df, val_df, test_df = _split_random_by_user(
+            df,
+            train_frac=train_frac,
+            val_frac=val_frac,
+            test_frac=test_frac,
+            seed=int(dataset_cfg.get("split_seed", 0)),
+        )
+    elif split_strategy == "chronological":
+        train_df, val_df, test_df = _split_by_user(df, train_frac, val_frac, test_frac)
+    else:
+        raise ValueError(f"Unsupported split_strategy: {split_strategy}")
+
+    if implicit_feedback:
+        train_df = _add_training_negatives(
+            train_df,
+            interactions=df,
+            n_items=int(df["movieId"].nunique()),
+            negative_ratio=int(dataset_cfg.get("negative_ratio", 1)),
+            seed=int(dataset_cfg.get("split_seed", 0)),
+        )
 
     stats = {
         "n_users": int(df["userId"].nunique()),

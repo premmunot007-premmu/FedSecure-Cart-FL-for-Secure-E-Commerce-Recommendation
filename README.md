@@ -54,24 +54,35 @@ python3 scripts/run_training.py --config configs/smoke_test.yaml
 python3 scripts/run_full_evaluation.py --config configs/smoke_test.yaml --output-dir outputs/smoke_grid
 ```
 
-## Amazon Movies and TV comparison setup
+## Multi-Epsilon Dataset Experiments
 
-Use the real Amazon review dataset alongside MovieLens by converting the review JSONL to the project’s expected CSV schema.
-
-```bash
-python3 scripts/convert_amazon_reviews.py \
-  --input /Users/mac/Downloads/Movies_and_TV.jsonl \
-  --output /Users/mac/Downloads/amazon_movies_tv_ratings.csv \
-  --max-rows 200000
-```
-
-Then point the project to the generated file by using the provided config:
+Run the primary MovieLens-32M grid (six epsilon values and all five defense families):
 
 ```bash
-python3 scripts/run_training.py --config configs/amazon_movies_tv.yaml
+python3 scripts/run_full_evaluation.py \
+  --config configs/movielens_32m.yaml \
+  --output-dir outputs/movielens_32m \
+  --epsilons 0.25,0.5,1,2,4,8
 ```
 
-This config is tuned for a lighter Amazon comparison run and keeps the dataset size manageable while still producing a valid federated recommendation benchmark.
+The attached Amazon catalog contains aggregate product ratings and a limited list of reviewer IDs per product, but it has no individual review scores or timestamps. The Amazon workflow therefore treats listed reviewer-product pairs as implicit positives, uses a seeded random per-user holdout, and samples unobserved products as training negatives. Amazon results report ranking and attack metrics; RMSE and chronological claims are intentionally omitted. Its reduced run uses one FL round and five sampled clients per round.
+
+Convert the Electronics category and run the reduced core-defense grid:
+
+```bash
+python3 scripts/convert_amazon_catalog.py \
+  --input /Users/mac/Desktop/TS_Material/amazon.csv \
+  --output /Users/mac/Desktop/TS_Material/amazon_electronics_implicit.csv \
+  --category Electronics
+
+python3 scripts/run_full_evaluation.py \
+  --config configs/amazon_electronics_implicit.yaml \
+  --output-dir outputs/amazon_electronics_implicit \
+  --epsilons 0.5,1,2 \
+  --defenses no_defense,secagg_only,dp_only,dp_secagg
+```
+
+Each run writes `results.csv`, `metrics_by_epsilon.png`, and `privacy_utility.png`. The CSV contains defense flags, epsilon, data dimensions/density, federated and model parameters, attack scores, ranking metrics, and wall-clock time.
 
 ## Configuration
 
@@ -80,6 +91,8 @@ The project uses YAML configs in `configs/`.
 - `configs/smoke_test.yaml` — lightweight validation run
 - `configs/default.yaml` — larger reproducible experiment setup
 - `configs/amazon_movies_tv.yaml` — Amazon review comparison setup
+- `configs/movielens_32m.yaml` — MovieLens-32M primary experiment
+- `configs/amazon_electronics_implicit.yaml` — reduced Amazon Electronics implicit-feedback experiment
 
 Fields include FL settings, client counts, privacy parameters, defense toggles, and evaluation details.
 

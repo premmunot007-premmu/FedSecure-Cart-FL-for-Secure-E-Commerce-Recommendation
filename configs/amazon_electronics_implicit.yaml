@@ -1,0 +1,56 @@
+dataset:
+  path: "/Users/mac/Desktop/TS_Material/amazon_electronics_implicit.csv"
+  implicit_feedback: true
+  split_strategy: "random"
+  split_seed: 21
+  min_user_ratings: 3
+  min_item_ratings: 2
+  negative_ratio: 1
+  split_fractions:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+
+federated:
+  num_clients: 232
+  clients_per_round: 5
+  num_rounds: 1
+  local_epochs: 1
+  batch_size: 64
+  lr: 0.01
+  seed: 21
+
+model:
+  embedding_dim: 16
+  mlp_layers: [32, 16]
+  dropout: 0.1
+
+privacy:
+  dp_enabled: true
+  secagg_enabled: true
+  he_enabled: false
+  clip_norm: 1.0
+  target_epsilon: 1.0
+  target_delta: 1.0e-5
+  noise_multiplier: null
+  relax_with_secagg: true
+  he:
+    poly_modulus_degree: 8192
+    coeff_mod_bit_sizes: [60, 40, 40, 60]
+    global_scale: 1073741824
+
+evaluation:
+  top_k: [5, 10]
+  metrics: ["recall", "ndcg"]
+  max_eval_users: 1000
+
+attacks:
+  shadow_model_count: 1
+  shadow_epochs: 1
+  gradient_inversion_iters: 10
+  gradient_inversion_lr: 0.05
+
+experiment:
+  output_dir: "outputs/amazon_electronics_implicit"
+  device: "cpu"
+  log_every: 1
