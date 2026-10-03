@@ -67,6 +67,25 @@ python3 scripts/run_full_evaluation.py \
 
 The attached Amazon catalog contains aggregate product ratings and a limited list of reviewer IDs per product, but it has no individual review scores or timestamps. The Amazon workflow therefore treats listed reviewer-product pairs as implicit positives, uses a seeded random per-user holdout, and samples unobserved products as training negatives. Amazon results report ranking and attack metrics; RMSE and chronological claims are intentionally omitted. Its reduced run uses one FL round and five sampled clients per round.
 
+For a matched pilot across both datasets, use the same core defenses and epsilon values. MovieLens uses a reproducible 3,000-user sample from the real 32M file; Amazon uses the Electronics implicit-feedback protocol above.
+
+```bash
+python3 scripts/run_full_evaluation.py \
+  --config configs/movielens_32m_comparison.yaml \
+  --output-dir outputs/movielens_32m_comparison \
+  --epsilons 0.5,1,2 \
+  --defenses no_defense,secagg_only,dp_only,dp_secagg
+
+python3 scripts/plot_dataset_comparison.py \
+  --movielens outputs/movielens_32m_comparison/results.csv \
+  --amazon outputs/amazon_electronics_implicit/results.csv \
+  --output-dir outputs/cross_dataset
+```
+
+The cross-dataset report separates explicit-rating RMSE from implicit-feedback ranking metrics. Membership attack AUC is centered on the 0.5 chance baseline, gradient-inversion support precision is shown separately, and runtime is normalized to each dataset's no-defense run.
+
+The comparison artifacts are saved under `outputs/cross_dataset/`: `membership_leakage.png`, `shadow_attack.png`, `recommendation_quality.png`, `movielens_rmse.png`, `gradient_inversion_resistance.png`, `relative_runtime.png`, `combined_results.csv`, and `COMPARISON_NOTES.md`. The MovieLens comparison uses a deterministic sample, not the full 32M-run grid.
+
 Convert the Electronics category and run the reduced core-defense grid:
 
 ```bash

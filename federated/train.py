@@ -11,7 +11,7 @@ import pandas as pd
 import torch
 import yaml
 
-from data.movielens import load_movielens_data
+from data.movielens import DatasetBundle, load_movielens_data
 from data.partition import build_client_train_data
 from evaluate.metrics import evaluate_model
 from federated.round import run_round
@@ -62,6 +62,7 @@ def resolve_noise_multiplier(config: dict[str, Any], *, num_clients: int, client
 def run_training(
     config: dict[str, Any] | str | Path,
     *,
+    dataset_bundle: DatasetBundle | None = None,
     dp_enabled: bool | None = None,
     secagg_enabled: bool | None = None,
     he_enabled: bool | None = None,
@@ -84,7 +85,8 @@ def run_training(
         config.setdefault("privacy", {})["target_epsilon"] = float(epsilon)
 
     device = torch.device(config.get("experiment", {}).get("device", "cpu"))
-    dataset_bundle = load_movielens_data(config)
+    if dataset_bundle is None:
+        dataset_bundle = load_movielens_data(config)
     client_data = build_client_train_data(dataset_bundle.train_df)
     num_clients = int(config.get("federated", {}).get("num_clients", max(1, len(client_data))))
     clients_per_round = int(config.get("federated", {}).get("clients_per_round", min(num_clients, max(1, len(client_data)))))

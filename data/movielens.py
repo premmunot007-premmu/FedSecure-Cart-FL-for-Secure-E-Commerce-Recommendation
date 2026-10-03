@@ -222,6 +222,14 @@ def load_movielens_data(config: dict[str, Any]) -> DatasetBundle:
     if missing:
         raise ValueError(f"Ratings data is missing columns: {sorted(missing)}")
 
+    max_users = int(dataset_cfg.get("max_users", 0))
+    if max_users > 0:
+        available_users = df["userId"].dropna().unique()
+        if len(available_users) > max_users:
+            rng = np.random.default_rng(int(dataset_cfg.get("sample_seed", 0)))
+            selected_users = rng.choice(available_users, size=max_users, replace=False)
+            df = df[df["userId"].isin(selected_users)].copy()
+
     selected_columns = ["userId", "movieId", "rating"]
     if "timestamp" in df.columns:
         selected_columns.append("timestamp")

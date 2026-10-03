@@ -12,6 +12,7 @@ import pandas as pd
 
 from attacks.gradient_inversion import run_gradient_inversion_attack
 from attacks.membership_inference import loss_threshold_attack, shadow_model_attack
+from data.movielens import load_movielens_data
 from evaluate.metrics import evaluate_model
 from federated.train import run_training
 
@@ -130,6 +131,7 @@ def run_experiment(
     model_cfg = config.get("model", {})
     dataset_cfg = config.get("dataset", {})
     attack_cfg = config.get("attacks", {})
+    dataset_bundle = load_movielens_data(config)
     for spec in build_experiment_grid(epsilons, defenses):
         started_at = time.perf_counter()
         cfg = copy.deepcopy(config)
@@ -140,7 +142,15 @@ def run_experiment(
         cfg["privacy"]["relax_with_secagg"] = spec["relax_with_secagg"]
         if spec["epsilon"] is not None:
             cfg["privacy"]["target_epsilon"] = float(spec["epsilon"])
-        trained = run_training(cfg, dp_enabled=spec["dp_enabled"], secagg_enabled=spec["secagg_enabled"], he_enabled=spec["he_enabled"], relax_with_secagg=spec["relax_with_secagg"], epsilon=spec["epsilon"])
+        trained = run_training(
+            cfg,
+            dataset_bundle=dataset_bundle,
+            dp_enabled=spec["dp_enabled"],
+            secagg_enabled=spec["secagg_enabled"],
+            he_enabled=spec["he_enabled"],
+            relax_with_secagg=spec["relax_with_secagg"],
+            epsilon=spec["epsilon"],
+        )
         model = trained["model"]
         dataset = trained["dataset"]
         implicit_feedback = bool(dataset_cfg.get("implicit_feedback", False))

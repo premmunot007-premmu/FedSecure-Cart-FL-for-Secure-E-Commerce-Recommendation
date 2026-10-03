@@ -19,6 +19,7 @@ from models.ncf import NCF
 from privacy.differential_privacy import clip_update
 from privacy.secure_aggregation import SecureAggregator, masked_sum_invariant
 from scripts.convert_amazon_catalog import convert_catalog
+from scripts.plot_dataset_comparison import make_comparison
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +35,75 @@ def test_experiment_grid_sweeps_each_epsilon() -> None:
     dp_specs = [spec for spec in grid if spec["dp_enabled"]]
     assert {spec["epsilon"] for spec in dp_specs} == set(epsilons)
     assert {spec["defense"] for spec in dp_specs} == {"dp_only", "dp_secagg"}
+
+
+def test_movielens_user_sample_is_seeded(tmp_path: Path) -> None:
+    ratings = pd.DataFrame(
+        [
+            {"userId": user_id, "movieId": item_id, "rating": 3.0 + item_id / 2, "timestamp": user_id * 10 + item_id}
+            for user_id in range(12)
+            for item_id in range(4)
+        ]
+    )
+    path = tmp_path / "ratings.csv"
+    ratings.to_csv(path, index=False)
+    config = {
+        "dataset": {
+            "path": str(path),
+            "min_user_ratings": 1,
+            "min_item_ratings": 1,
+            "max_users": 5,
+            "sample_seed": 23,
+        }
+    }
+
+    first = load_movielens_data(config)
+    second = load_movielens_data(config)
+
+    assert first.stats["n_users"] == 5
+    assert first.stats == second.stats
+    pd.testing.assert_frame_equal(first.train_df, second.train_df)
+
+
+def test_cross_dataset_plots_cover_security_utility_and_cost(tmp_path: Path) -> None:
+    rows = []
+    for dataset_name, implicit in [("MovieLens-32M sample", False), ("Amazon Electronics", True)]:
+        for defense, epsilon in [("no_defense", None), ("secagg_only", None), ("dp_only", 0.5), ("dp_secagg", 0.5)]:
+            rows.append(
+                {
+                    "defense": defense,
+                    "epsilon": epsilon,
+                    "mia_auc": 0.52,
+                    "shadow_auc": 0.51,
+                    "support_precision": 0.4,
+                    "recall@5": 0.2,
+                    "ndcg@5": 0.1,
+                    "wall_time_sec": 2.0 if defense == "no_defense" else 3.0,
+                    "dataset_n_users": 100,
+                    "dataset_n_items": 50,
+                    "dataset_n_interactions": 1000,
+                    "dataset_density": 0.2,
+                    "rmse": None if implicit else 1.1,
+                }
+            )
+    movie_path = tmp_path / "movie_results.csv"
+    amazon_path = tmp_path / "amazon_results.csv"
+    pd.DataFrame(rows[:4]).to_csv(movie_path, index=False)
+    pd.DataFrame(rows[4:]).to_csv(amazon_path, index=False)
+
+    combined = make_comparison(movie_path, amazon_path, tmp_path / "plots")
+
+    assert len(combined) == 8
+    assert set(combined["dataset"]) == {"MovieLens-32M sample (3k users)", "Amazon Electronics"}
+    plot_names = {path.name for path in (tmp_path / "plots").glob("*.png")}
+    assert plot_names == {
+        "membership_leakage.png",
+        "shadow_attack.png",
+        "recommendation_quality.png",
+        "movielens_rmse.png",
+        "gradient_inversion_resistance.png",
+        "relative_runtime.png",
+    }
 
 
 def test_amazon_catalog_implicit_feedback_pipeline(tmp_path: Path) -> None:
